@@ -31,6 +31,7 @@ def make_dirs(data_path, df):
     :param df: dataframe from the train_labels.csv file
     :return: None
     """
+    print('creating train/valid directories with subdirectories')
     if not os.path.exists(data_path + '/train'):
         os.mkdir(data_path + '/train')
     if not os.path.exists(data_path + '/valid'):
@@ -51,8 +52,13 @@ def organize_imgs(data_path, df):
     :param df: dataframe from the train_labels.csv file
     :return:
     """
-    for f in os.listdir(train_img_path):
-        print(f)
+    print('copying images from train_images to train folders')
+    num_imgs = len(os.listdir(train_img_path))
+
+    for idx, f in enumerate(os.listdir(train_img_path)):
+        if idx % 100 == 0 or idx == num_imgs - 1:
+            print('copying files ' + str(idx) + '/' + str(num_imgs) + '...')
+
         if os.stat(train_img_path + '/' + f).st_size > 0:
             species = df[df['filename'] == f]['scientific_name'].values[0]
             copy2(train_img_path + '/' + f, data_path + '/train/' + species + '/' + f)
@@ -66,6 +72,7 @@ def split_data(data_path, split_ratio):
     :param split_ratio: train-valid split ratio
     :return:
     """
+    print('splitting images into train/valid images')
     species_list = os.listdir(data_path + '/train')
     if '.DS_Store' in species_list:
         species_list.remove('.DS_Store')
@@ -75,7 +82,7 @@ def split_data(data_path, split_ratio):
         valid_dir = os.path.join(data_path + '/valid', species)
 
         imgs = os.listdir(train_dir)
-        valid_imgs = random.choices(imgs, k=int(len(imgs)*split_ratio))
+        valid_imgs = random.sample(imgs, k=int(len(imgs)*(1-split_ratio)))
         for img in valid_imgs:
             src = train_dir + '/' + img
             dst = valid_dir + '/' + img
