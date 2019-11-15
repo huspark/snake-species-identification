@@ -6,7 +6,44 @@ import sys
 
 import pandas as pd
 
+import time
+import cv2
+import numpy as np
 
+def dataset_mean_std(path):
+    '''
+    Calculates the mean of the dataset given the image folder path.
+
+    :param path: path to the root folder with images (not divided by classes)
+    :return c_mean/n: dataset color mean
+    :return np.sqrt(c_var/n): average dataset color standard deviation
+    '''
+
+    # snakes_mean_color = [103.64519509, 118.35241679, 124.96846096] 
+    # snakes_std_color  = [50.93829403, 52.51745522, 54.89964224] 
+
+    files = os.listdir(path)
+    n = len(files)
+    print('No. of images:', n)
+    
+    start_time = time.time()
+    
+    c_mean, c_var = np.zeros((3,1)), np.zeros((3,1))
+
+    for i in range(n):
+        path_img = path + files[i]
+        print(i, end="\r")
+        img_test = cv2.imread(path_img)
+
+        # Check if file is broken
+        if img_test is not None:
+            mean, std = cv2.meanStdDev(img_test)
+            c_mean += mean
+            c_var += np.square(std) 
+    
+    print("Elapsed %s seconds" % (time.time() - start_time))
+    
+    return c_mean/n, np.sqrt(c_var/n)
 
 def process_arg():
     """

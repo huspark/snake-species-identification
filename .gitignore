@@ -1,0 +1,14 @@
+# Ignore dataset folders
+dataset/
+test_images_small/
+test_images_small_resized/
+train_archive/
+train_images/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints
