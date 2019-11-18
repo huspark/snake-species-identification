@@ -124,8 +124,8 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, help="Model name")
     parser.add_argument('--weight-decay', type=float, default=0.0, help='Weight decay hyperparameter')
     parser.add_argument('--lr', type=float, default = 1e-3, metavar='LR', help='learning rate')
-    parser.add_argument('--lr_step_size', type=int, default = 50, help='learning rate scheduler step size')
-    parser.add_argument('--lr_step_gamma', type=int, default = 0.1, help='learning rate step gamma')
+    parser.add_argument('--lr-step-size', type=int, default = 50, help='learning rate scheduler step size')
+    parser.add_argument('--lr-step-gamma', type=int, default = 0.1, help='learning rate step gamma')
     parser.add_argument('--epochs', type=int, default=10, help='number of epochs to train')
 
     parser.add_argument('--log-interval', type=int, default=10, metavar='N', 
