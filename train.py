@@ -2,6 +2,7 @@ import os
 import argparse
 import random
 import numpy as np 
+import time
 
 import torch
 import torch.optim as optim
@@ -228,16 +229,21 @@ if __name__ == '__main__':
     model.to(device)
 
     acc_best = 0
-
+    
+    start = time.time()
     # train the model one epoch at a time
     for epoch in range(1, args.epochs + 1):
         val_acc = train(epoch)
 
         if val_acc > acc_best:
             acc_best = val_acc
-            print('Saving better model ', val_acc)
+            print('Saving better model ', val_acc.item())
             torch.save(model, args.model + '_best.pt')
 
-    evaluate('test', verbose=True)
+    print ("Elapsed training {:.2f}".format(time.time() - start), 's')
 
-    print('Best acc ', acc_best)
+    start = time.time()
+    evaluate('test', verbose=True)
+    print ("Elapsed evaluation {:.2f}".format(time.time() - start), 's')
+
+    print('Best accuracy: ', acc_best.item())
