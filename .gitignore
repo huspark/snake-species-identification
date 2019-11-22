@@ -12,3 +12,7 @@ __pycache__/
 
 # Jupyter
 .ipynb_checkpoints
+
+# Ignore model files
+resnet18_best.pt
+vgg19bn_best.pt
