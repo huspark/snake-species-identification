@@ -13,6 +13,7 @@ from torch.autograd import Variable
 import torchvision
 from torchvision import transforms
 
+
 def get_splits(dataset, train_split=0.8, test_split=0.15):
     '''
     Obtain train/test/validation splits from a given Torch dataset.
@@ -36,6 +37,42 @@ def get_splits(dataset, train_split=0.8, test_split=0.15):
     train_dataset, test_dataset, val_dataset = data.random_split(dataset, [train_size, test_size, val_size])
 
     return train_dataset, test_dataset, val_dataset
+
+
+def filter_data(dataset, batch_size=256):
+    model = torchvision.models.resnext101_32x8d(pretrained=True)
+
+    model.eval()
+    if torch.cuda.is_available():
+        print("using GPU to filter data")
+        model.to(torch.device("cuda"))
+
+    full_data = data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+    idx = []
+
+    with torch.no_grad():
+        for i, (batch_img, _) in enumerate(full_data):
+            if i % 10 == 0:
+                print(str(batch_size*i) + ' images evaluated.' + ' ' + str(batch_size*i-len(idx)) + ' images filtered.')
+            if torch.cuda.is_available():
+                batch_img = batch_img.to(torch.device("cuda"))
+            batch_out = model(batch_img)
+            batch_out = torch.argsort(batch_out, dim=1, descending=True)[:, :5]
+            for j in range(batch_out.shape[0]):
+                if check_top_five(batch_out[j]):
+                    idx.append(i*batch_size+j)
+
+    return torch.utils.data.Subset(dataset, idx)
+
+
+def check_top_five(label_tensor):
+    label_list = label_tensor.tolist()
+    for i in range(len(label_list)):
+        if 37 < label_list[i] < 51 or 51 < label_list[i] < 69:
+            return True
+    return False
+
 
 def train(epoch):
     '''
@@ -73,6 +110,7 @@ def train(epoch):
 
     return val_acc
 
+
 def evaluate(split, verbose=False, n_batches=None):
     '''
     Compute loss on val or test data. This function is taken from HW1.
@@ -107,6 +145,7 @@ def evaluate(split, verbose=False, n_batches=None):
             split, loss, correct, n_examples, acc))
     return loss, acc
 
+
 if __name__ == '__main__':
 
     # Parse the arguments
@@ -131,6 +170,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--log-interval', type=int, default=10, metavar='N', 
         help='number of batches between logging train status')
+
+    parser.add_argument('--filter', type=bool, default=False, help='Set to True to enable filtering of data')
 
     args = parser.parse_args()
     args.cuda = torch.cuda.is_available()
@@ -179,6 +220,9 @@ if __name__ == '__main__':
     #print(dataset)
 
     train_dataset, test_dataset, val_dataset = get_splits(dataset, args.train_split, args.test_split)
+
+    if args.filter:
+        train_dataset = filter_data(train_dataset)
 
     train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
     test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
