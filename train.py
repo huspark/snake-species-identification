@@ -40,6 +40,16 @@ def get_splits(dataset, train_split=0.8, test_split=0.15):
 
 
 def filter_data(dataset, batch_size=256):
+    '''
+    Filter non-snake or lizard images from the input dataset.
+
+    Args:
+        dataset (torch.utils.data.Dataset): dataset to apply the filter
+        batch_size (int): batch size for evaluating images with resnext101_32x8d
+
+    Returns:
+        dataset (torch.utils.data.Dataset): filtered datset
+    '''
     model = torchvision.models.resnext101_32x8d(pretrained=True)
 
     model.eval()
@@ -63,10 +73,22 @@ def filter_data(dataset, batch_size=256):
                 if check_top_five(batch_out[j]):
                     idx.append(i*batch_size+j)
 
-    return torch.utils.data.Subset(dataset, idx)
+    dataset = torch.utils.data.Subset(dataset, idx)
+
+    return dataset
 
 
 def check_top_five(label_tensor):
+    '''
+    Checks if top 5 ImageNet predictions of an input image are snake or lizard-like.
+
+    Args:
+        label_tensor (torch.Tensor): the top five predictions of an input image
+
+    Returns:
+        True (Boolean): if the top five predictions contain a snake or lizard label
+        False (Boolean): otherwise
+    '''
     label_list = label_tensor.tolist()
     for i in range(len(label_list)):
         if 37 < label_list[i] < 51 or 51 < label_list[i] < 69:
@@ -123,19 +145,20 @@ def evaluate(split, verbose=False, n_batches=None):
         loader = val_loader
     elif split == 'test':
         loader = test_loader
-    for batch_i, batch in enumerate(loader):
-        data, target = batch
-        if args.cuda:
-            data, target = data.cuda(), target.cuda()
-        data, target = Variable(data, volatile=True), Variable(target)
-        output = model(data)
-        loss += criterion(output, target, size_average=False).data
-        # predict the argmax of the log-probabilities
-        pred = output.data.max(1, keepdim=True)[1]
-        correct += pred.eq(target.data.view_as(pred)).cpu().sum()
-        n_examples += pred.size(0)
-        if n_batches and (batch_i >= n_batches):
-            break
+    with torch.no_grad():
+        for batch_i, batch in enumerate(loader):
+            data, target = batch
+            if args.cuda:
+                data, target = data.cuda(), target.cuda()
+            data, target = Variable(data, volatile=True), Variable(target)
+            output = model(data)
+            loss += criterion(output, target, size_average=False).data
+            # predict the argmax of the log-probabilities
+            pred = output.data.max(1, keepdim=True)[1]
+            correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+            n_examples += pred.size(0)
+            if n_batches and (batch_i >= n_batches):
+                break
 
     loss /= n_examples
     acc = 100. * correct / n_examples
@@ -223,6 +246,7 @@ if __name__ == '__main__':
 
     if args.filter:
         train_dataset = filter_data(train_dataset)
+        torch.cuda.empty_cache()
 
     train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
     test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
