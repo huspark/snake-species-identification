@@ -1,4 +1,4 @@
-import os
+import os, sys
 import argparse
 import random
 import numpy as np 
@@ -12,32 +12,6 @@ from torch.autograd import Variable
 
 import torchvision
 from torchvision import transforms
-
-
-def get_splits(dataset, train_split=0.8, test_split=0.15):
-    '''
-    Obtain train/test/validation splits from a given Torch dataset.
-
-    Args:
-        dataset (torch.utils.data.Dataset): Source dataset to be split
-        train_split (float): Train split ratio
-        test_split (float): Test split ratio
-    
-    Returns:
-        train_dataset (torch.utils.data.Subset): Training subset
-        test_dataset (torch.utils.data.Subset): Testing subset
-        val_dataset (torch.utils.data.Subset): Validation subset of size 
-            len(dataset) - len(dataset)*train_split - len(dataset)*test_split
-    '''
-
-    n = len(dataset)
-    train_size, test_size = int(train_split * n), int(test_split * n)
-    val_size = n - train_size - test_size
-
-    train_dataset, test_dataset, val_dataset = data.random_split(dataset, [train_size, test_size, val_size])
-
-    return train_dataset, test_dataset, val_dataset
-
 
 def filter_data(dataset, batch_size=256):
     '''
@@ -95,6 +69,79 @@ def check_top_five(label_tensor):
             return True
     return False
 
+def get_weights(dataset):
+    '''
+    Obtain class-wise and element-wise weights for sampling.
+    Source: https://discuss.pytorch.org/t/balanced-sampling-between-classes-with-torchvision-dataloader/2703
+
+    TODO: Optimize (taken as is and slightly adapted)
+
+    Args:
+        dataset (torchvision.datasets.ImageFolder): Source dataset
+
+    Returns:
+        w_classes (sequence): weights per class
+        w_images (sequence): weights per image
+
+    '''
+    
+    images = dataset.imgs
+    n_classes = len(dataset.classes)
+    n_images = len(images)
+    
+    w_classes = [0.] * n_classes
+    w_images = [0.] * n_images 
+    weight_per_class = [0.] * n_classes   
+    
+    # Count number of images per class
+    for item in images:                                                         
+        w_classes[item[1]] += 1.0
+        
+    for i in range(n_classes):                                                   
+        weight_per_class[i] = float(n_images)/float(w_classes[i])     
+        
+    for idx, val in enumerate(images):                                          
+        w_images[idx] = weight_per_class[val[1]]  
+        
+    return w_classes, w_images
+
+
+def get_lr(optimizer):
+    '''
+    Get current learning rate
+
+    Args:
+        optimizer:
+
+    Returns:
+        lr (): current learning rate of the optimizer
+    '''
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
+
+def get_splits(dataset, train_split=0.8, test_split=0.15):
+    '''
+    Obtain train/test/validation splits from a given Torch dataset.
+
+    Args:
+        dataset (torch.utils.data.Dataset): Source dataset to be split
+        train_split (float): Train split ratio
+        test_split (float): Test split ratio
+    
+    Returns:
+        train_dataset (torch.utils.data.Subset): Training subset
+        test_dataset (torch.utils.data.Subset): Testing subset
+        val_dataset (torch.utils.data.Subset): Validation subset of size 
+            len(dataset) - len(dataset)*train_split - len(dataset)*test_split
+    '''
+
+    n = len(dataset)
+    train_size, test_size = int(train_split * n), int(test_split * n)
+    val_size = n - train_size - test_size
+
+    train_dataset, test_dataset, val_dataset = data.random_split(dataset, [train_size, test_size, val_size])
+
+    return train_dataset, test_dataset, val_dataset
 
 def train(epoch):
     '''
@@ -130,8 +177,7 @@ def train(epoch):
 
     scheduler.step()
 
-    return val_acc
-
+    return val_acc, loss
 
 def evaluate(split, verbose=False, n_batches=None):
     '''
@@ -141,24 +187,29 @@ def evaluate(split, verbose=False, n_batches=None):
     loss = 0
     correct = 0
     n_examples = 0
+
     if split == 'val':
         loader = val_loader
     elif split == 'test':
         loader = test_loader
-    with torch.no_grad():
-        for batch_i, batch in enumerate(loader):
-            data, target = batch
-            if args.cuda:
-                data, target = data.cuda(), target.cuda()
-            data, target = Variable(data, volatile=True), Variable(target)
-            output = model(data)
+    for batch_i, batch in enumerate(loader):
+        data, target = batch
+        if args.cuda:
+            data, target = data.cuda(), target.cuda()
+        data, target = Variable(data, volatile=True), Variable(target)
+        output = model(data)
+
+        if args.imbalanced:
+            loss += criterion(output, target).data
+        else:
             loss += criterion(output, target, size_average=False).data
-            # predict the argmax of the log-probabilities
-            pred = output.data.max(1, keepdim=True)[1]
-            correct += pred.eq(target.data.view_as(pred)).cpu().sum()
-            n_examples += pred.size(0)
-            if n_batches and (batch_i >= n_batches):
-                break
+
+        # predict the argmax of the log-probabilities
+        pred = output.data.max(1, keepdim=True)[1]
+        correct += pred.eq(target.data.view_as(pred)).cpu().sum()
+        n_examples += pred.size(0)
+        if n_batches and (batch_i >= n_batches):
+            break
 
     loss /= n_examples
     acc = 100. * correct / n_examples
@@ -167,7 +218,6 @@ def evaluate(split, verbose=False, n_batches=None):
         print('\n{} set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
             split, loss, correct, n_examples, acc))
     return loss, acc
-
 
 if __name__ == '__main__':
 
@@ -182,22 +232,43 @@ if __name__ == '__main__':
 
     # Val split is the remaining part
     parser.add_argument('--train_split', type=float, default=0.8, help='Train split ratio')
-    parser.add_argument('--test_split', type=float, default=0.15, help='Test split ratio')
+    parser.add_argument('--test_split', type=float, default=0.1, help='Test split ratio')
 
     parser.add_argument('--model', type=str, help="Model name")
     parser.add_argument('--weight-decay', type=float, default=0.0, help='Weight decay hyperparameter')
     parser.add_argument('--lr', type=float, default = 1e-3, metavar='LR', help='learning rate')
     parser.add_argument('--lr-step-size', type=int, default = 50, help='learning rate scheduler step size')
-    parser.add_argument('--lr-step-gamma', type=float, default = 0.1, help='learning rate step gamma')
+    parser.add_argument('--lr-step-gamma', type=int, default = 0.1, help='learning rate step gamma')
     parser.add_argument('--epochs', type=int, default=10, help='number of epochs to train')
 
     parser.add_argument('--log-interval', type=int, default=10, metavar='N', 
         help='number of batches between logging train status')
-
+    
     parser.add_argument('--filter', type=bool, default=False, help='Set to True to enable filtering of data')
 
+    # New: arguments to continue training
+    parser.add_argument('--resume', type=str, default=None, help='Filename of the model to continue training')
+
+    # New: optimizer selection
+    parser.add_argument('--optimizer', choices=['sgd', 'adam'], default='adam', help = 'Optimizer selection')
+    parser.add_argument('--momentum', type=float, default = 0.99, help='SGD momentum')
+
+    # New: dealing with the imbalanced dataset
+    parser.add_argument('--imbalanced', action='store_true', default=False, help='Handle imbalanced dataset')
+
+    # New: multi-gpu
+    parser.add_argument('--devices', nargs='+', type=int, help='CUDA Devices', default=None)
+
+    # New: num_workers for loader
+    parser.add_argument('--num-workers', type=int, default=1, help='num_workers for DataLoader')
+
     args = parser.parse_args()
+
     args.cuda = torch.cuda.is_available()
+
+    # Workaround
+    if args.devices is not None:
+        print("CUDA Devices: ", args.devices)
 
     #device = torch.device("cuda" if args.cuda else "cpu")
     #kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
@@ -206,9 +277,10 @@ if __name__ == '__main__':
 
     if args.cuda:
         torch.cuda.empty_cache() 
-        kwargs = {'num_workers': 1, 'pin_memory': True}
+        kwargs = {'num_workers': args.num_workers, 'pin_memory': True}
         device = "cuda"
         torch.cuda.manual_seed(random_seed)
+        torch.manual_seed(random_seed)
     else:
         kwargs = {}
         device = "cpu"
@@ -242,27 +314,44 @@ if __name__ == '__main__':
     dataset = torchvision.datasets.ImageFolder(root=args.path, transform=transform)
     #print(dataset)
 
+    # TODO: Finish, optimize
+    if args.imbalanced:
+        pass
+
+    w_classes, w_images = get_weights(dataset)
+    w_classes = torch.FloatTensor(w_classes)
+    w_images = torch.DoubleTensor(w_images)
+
+    # New: sampler
+    # TODO: Finish, fix sampler for the subset
     train_dataset, test_dataset, val_dataset = get_splits(dataset, args.train_split, args.test_split)
+    sampler = torch.utils.data.sampler.WeightedRandomSampler(w_images, len(w_images))  
 
     if args.filter:
         train_dataset = filter_data(train_dataset)
         torch.cuda.empty_cache()
 
-    train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
-    test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
-    val_loader = data.DataLoader(dataset=val_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+    if args.imbalanced:
+        # Temporary, doesn't work
+        #train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, sampler=sampler, **kwargs)
+        #test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, sampler=sampler, **kwargs)
+        #val_loader = data.DataLoader(dataset=val_dataset, batch_size=args.batch_size, sampler=sampler, **kwargs)
+        train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+        test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+        val_loader = data.DataLoader(dataset=val_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+    else:
+        train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+        test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+        val_loader = data.DataLoader(dataset=val_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+    
 
     # Model definition
     model = None
     optimizer = None
     scheduler = None
 
-    #args.model = 'vgg19bn'
-    #args.weight_decay = 1e-5
-
     # Select the model
     # TODO: Add option to switch between transfer learning and fine-tuning
-    # TODO: Add option to switch between adam and SGD
 
     # VGG19 Batch normalized
     if args.model == 'vgg19bn':
@@ -284,34 +373,108 @@ if __name__ == '__main__':
     elif args.model == 'squeezenet':
         model = torchvision.models.squeezenet1_1(pretrained=True)
         model.classifier[1] = torch.nn.Conv2d(512, n_classes, kernel_size=(1,1), stride=(1,1))
-
     else:
         raise Exception('Unknown model {}'.format(args.model))
 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    # New: Multi-GPU
+    if args.devices is not None:
+        #model = torch.nn.DataParallel(model, device_ids=args.devices)
+        try:
+            model = torch.nn.DataParallel(model)
+        except:
+            e = sys.exc_info()[0]
+            print(e)
+
+
+    acc_best = 0
+    epoch_start = 1
+
+    # Done: Add option to switch between adam and SGD
+    if args.optimizer == 'adam':
+        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    elif args.optimizer == 'sgd':
+        optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, 
+            weight_decay=args.weight_decay)
+
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size, gamma=args.lr_step_gamma)
 
+    # Resume training if specified
+    if args.resume is not None:
+        print('Loading model ... ')
+
+        if os.path.isfile(args.resume):
+            # Need to load on CPU first, otherwise CUDA out of memory error
+            checkpoint = torch.load(args.resume, map_location='cpu')
+            model.load_state_dict(checkpoint['model_state_dict'])
+            model.to(device)
+
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            epoch_start = checkpoint['epoch']
+            loss = checkpoint['loss']
+            acc_best = checkpoint['acc_best']
+
+            print('Starting epoch: ', checkpoint['epoch'], ' Loss: {:.8f}'.format(checkpoint['loss']), 'Best accuracy: {:.8f}'.format(checkpoint['acc_best']))
+            # DEBUG:
+
+            opt_dict = optimizer.state_dict()
+            sch_dict = scheduler.state_dict()
+            print('Debug: ')
+            print('Epoch:', epoch_start, ' LR: {:.8f}'.format(get_lr(optimizer)), 'Sch Epoch', sch_dict['last_epoch'])
+
+
+        else:
+            raise Exception('Checkpoint not found {}'.format(args.resume))
+    
     # TODO: Add args to change criterion
-    criterion = F.cross_entropy
+    # Debug
+    print('Imbalanced', args.imbalanced)
+    if args.imbalanced:
+        criterion = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor(w_classes).cuda())
+    else:
+        criterion = F.cross_entropy
 
     model.to(device)
 
-    acc_best = 0
-    
     start = time.time()
-    # train the model one epoch at a time
-    for epoch in range(1, args.epochs + 1):
-        val_acc = train(epoch)
+    # Train the model one epoch at a time
+    for epoch in range(epoch_start, epoch_start + args.epochs):
+        
+        opt_dict = optimizer.state_dict()
+        sch_dict = scheduler.state_dict()
 
+        print('Epoch:', epoch, ' LR:', get_lr(optimizer), 'Sch Epoch', sch_dict['last_epoch'])
+
+        val_acc, loss = train(epoch)
+
+        # Saves the best model dictionary with "_best.pth"
         if val_acc > acc_best:
             acc_best = val_acc
             print('Saving better model ', val_acc.item())
-            torch.save(model, args.model + '_best.pt')
 
-    print ("Elapsed training {:.2f}".format(time.time() - start), 's')
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'val_acc': val_acc,
+                'acc_best': acc_best,
+                'loss': loss}, args.model + '_best.pth')
+
+        # Saves the current model dictionary with "_last.pth"
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
+            'val_acc': val_acc,
+            'acc_best': acc_best,
+            'loss': loss}, args.model + '_last.pth')
+
+    print ("Elapsed training {:.2f}".format((time.time() - start) / 3600.0), 'hours')
 
     start = time.time()
     evaluate('test', verbose=True)
-    print ("Elapsed evaluation {:.2f}".format(time.time() - start), 's')
+    print ("Elapsed evaluation {:.2f}".format((time.time() - start)), 'seconds')
 
     print('Best accuracy: ', acc_best.item())
