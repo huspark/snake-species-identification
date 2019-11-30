@@ -77,30 +77,28 @@ def get_weights(dataset):
     TODO: Optimize (taken as is and slightly adapted)
 
     Args:
-        dataset (torchvision.datasets.ImageFolder): Source dataset
+        dataset (torch.util.data.Subset): Source dataset
 
     Returns:
         w_classes (sequence): weights per class
         w_images (sequence): weights per image
 
     '''
-    
-    images = dataset.imgs
-    n_classes = len(dataset.classes)
-    n_images = len(images)
+    n_classes = 85
+    n_images = len(dataset)
     
     w_classes = [0.] * n_classes
     w_images = [0.] * n_images 
     weight_per_class = [0.] * n_classes   
     
     # Count number of images per class
-    for item in images:                                                         
+    for item in dataset:
         w_classes[item[1]] += 1.0
         
     for i in range(n_classes):                                                   
         weight_per_class[i] = float(n_images)/float(w_classes[i])     
         
-    for idx, val in enumerate(images):                                          
+    for idx, val in enumerate(dataset):
         w_images[idx] = weight_per_class[val[1]]  
         
     return w_classes, w_images
@@ -152,10 +150,68 @@ def train(epoch):
     # (as opposed to eval mode) so it knows which one to use.
     
     # train loop
+    if args.imbalanced:
+        normalized_w_classes = [float(val)/sum(w_classes) for val in w_classes]
+
     for batch_idx, batch in enumerate(train_loader):
         model.train()
         # prepare data
         images, targets = Variable(batch[0]), Variable(batch[1])
+        if args.imbalanced:
+            for i in range(len(targets)):
+                # To ensure the probability of images[i] being augmented is equal to normalized_w_classes[targets[i]],
+                # (1-p) ** num_transforms must be equal to 1 - normalized_w_classes[targets[i]]
+                # Here, p is the probability of each transformation in trasnform_list_imbalanced
+
+                # Therefore, we set 1 - p = (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
+                # which is equivalent to p = 1 - (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
+                # So, we set p (the probability of applying a random transformation to images[i] to the specified value
+
+                num_transforms = 4
+                p = 1 - (1 - normalized_w_classes[targets[i]]) ** (1 / num_transforms)
+
+                # Debugging
+                if batch_idx < 10:
+                    print(targets[i])
+                    print(p)
+
+                transform_list_imbalanced = []
+                transform_list_imbalanced.append(transforms.ToPILImage())
+                transform_list_imbalanced.append(transforms.RandomHorizontalFlip(p=p))
+                transform_list_imbalanced.append(transforms.RandomPerspective(p=p))
+                transform_list_imbalanced.append(transforms.RandomApply([transforms.RandomRotation(degrees=15)], p=p))
+                transform_list_imbalanced.append(transforms.RandomApply(
+                    [transforms.RandomResizedCrop(size=(args.height, args.width), scale=(0.5, 1.0))], p=p))
+                transform_list_imbalanced.append(transforms.ToTensor())
+                transform_imbalanced = transforms.Compose(transform_list_imbalanced)
+                images[i] = transform_imbalanced(images[i])
+
+                # To ensure the probability of images[i] being augmented is equal to normalized_w_classes[targets[i]],
+                # (1-p) ** num_transforms must be equal to 1 - normalized_w_classes[targets[i]]
+                # Here, p is the probability of each transformation in trasnform_list_imbalanced
+
+                # Therefore, we set 1 - p = (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
+                # which is equivalent to p = 1 - (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
+                # So, we set p (the probability of applying a random transformation to images[i] to the specified value
+
+
+                # num_transforms = 4
+                # p = 1 - (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
+                # transform_list_imbalanced = []
+                # transform_list_imbalanced.append(transforms.RandomHorizontalFlip(p=p))
+                # transform_list_imbalanced.append(transforms.RandomPerspective(p=p))
+                # transform_list_imbalanced.append(transforms.RandomApply([transforms.RandomRotation(degrees=15)], p=p))
+                # transform_list_imbalanced.append(transforms.RandomApply(
+                #     [transforms.RandomResizedCrop(size=(args.height, args.width), scale=(0.5, 1.0))], p=p))
+                # transform_imbalanced = transforms.Compose(transform_list_imbalanced)
+                # tmp_trans = transforms.ToPILImage()
+                # img = tmp_trans(images[i])
+                # img.convert('RGB').show()
+                #
+                # img = transform_imbalanced(img)
+                # img.convert('RGB').show()
+                # tmp_trans = transforms.ToTensor()
+                # images[i] = tmp_trans(img)
         if args.cuda:
             images, targets = images.cuda(), targets.cuda()
         
@@ -314,31 +370,34 @@ if __name__ == '__main__':
     dataset = torchvision.datasets.ImageFolder(root=args.path, transform=transform)
     #print(dataset)
 
-    # TODO: Finish, optimize
-    if args.imbalanced:
-        pass
+    # # TODO: Finish, optimize
+    # if args.imbalanced:
+    #     pass
 
-    w_classes, w_images = get_weights(dataset)
-    w_classes = torch.FloatTensor(w_classes)
-    w_images = torch.DoubleTensor(w_images)
+    # w_classes, w_images = get_weights(train_dataset)
+    # w_classes = torch.FloatTensor(w_classes)
+    # w_images = torch.DoubleTensor(w_images)
 
     # New: sampler
     # TODO: Finish, fix sampler for the subset
     train_dataset, test_dataset, val_dataset = get_splits(dataset, args.train_split, args.test_split)
-    sampler = torch.utils.data.sampler.WeightedRandomSampler(w_images, len(w_images))  
 
     if args.filter:
         train_dataset = filter_data(train_dataset)
         torch.cuda.empty_cache()
 
+
     if args.imbalanced:
-        # Temporary, doesn't work
-        #train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, sampler=sampler, **kwargs)
-        #test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, sampler=sampler, **kwargs)
-        #val_loader = data.DataLoader(dataset=val_dataset, batch_size=args.batch_size, sampler=sampler, **kwargs)
-        train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
-        test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
-        val_loader = data.DataLoader(dataset=val_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+        w_classes, w_images = get_weights(train_dataset)
+        w_classes = torch.FloatTensor(w_classes)
+        w_images = torch.DoubleTensor(w_images)
+        sampler = torch.utils.data.sampler.WeightedRandomSampler(weights=w_images, num_samples=len(w_images))
+        train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, sampler=sampler, **kwargs)
+        test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, **kwargs)
+        val_loader = data.DataLoader(dataset=val_dataset, batch_size=args.batch_size, **kwargs)
+        # train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+        # test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
+        # val_loader = data.DataLoader(dataset=val_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
     else:
         train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
         test_loader = data.DataLoader(dataset=test_dataset, batch_size=args.batch_size, shuffle=True, **kwargs)
@@ -429,10 +488,10 @@ if __name__ == '__main__':
     # TODO: Add args to change criterion
     # Debug
     print('Imbalanced', args.imbalanced)
-    if args.imbalanced:
-        criterion = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor(w_classes).cuda())
-    else:
-        criterion = F.cross_entropy
+    # if args.imbalanced:
+    #     criterion = torch.nn.CrossEntropyLoss(weight=torch.FloatTensor(w_classes).cuda())
+    # else:
+    criterion = F.cross_entropy
 
     model.to(device)
 
