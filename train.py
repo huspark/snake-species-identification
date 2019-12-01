@@ -216,7 +216,14 @@ def train(epoch):
             images, targets = images.cuda(), targets.cuda()
         
         output = model(images)
-        loss = F.cross_entropy(output, targets)
+		
+		# Use weighted cross-entropy when imbalaced flag is true
+        #loss = F.cross_entropy(output, targets)
+        if args.imbalanced:
+            loss = criterion(output, targets, weight=w_classes)
+        else:
+            loss = criterion(output, targets)
+			
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -226,6 +233,11 @@ def train(epoch):
             train_loss = loss.data
             examples_this_epoch = batch_idx * len(images)
             epoch_progress = 100. * batch_idx / len(train_loader)
+			
+			# Need this when weighted cross-entropy is used
+            if args.imbalanced:
+                train_loss =  args.batch_size / args.batch_size
+				
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\t'
                   'Train Loss: {:.6f}\tVal Loss: {:.6f}\tVal Acc: {}'.format(
                 epoch, examples_this_epoch, len(train_loader.dataset),
@@ -439,7 +451,7 @@ if __name__ == '__main__':
     if args.devices is not None:
         #model = torch.nn.DataParallel(model, device_ids=args.devices)
         try:
-            model = torch.nn.DataParallel(model)
+            model = torch.nn.DataParallel(model, device_ids=args.devices)
         except:
             e = sys.exc_info()[0]
             print(e)
@@ -457,6 +469,7 @@ if __name__ == '__main__':
 
     scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size, gamma=args.lr_step_gamma)
 
+    # TODO: Make an if-else in order not to initialize everything if resume flag is specified
     # Resume training if specified
     if args.resume is not None:
         print('Loading model ... ')
@@ -469,9 +482,17 @@ if __name__ == '__main__':
 
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-            epoch_start = checkpoint['epoch']
+            epoch_start = checkpoint['epoch'] + 1
             loss = checkpoint['loss']
             acc_best = checkpoint['acc_best']
+
+            train_dataset = checkpoint['train_dataset']
+            test_dataset = checkpoint['test_dataset']
+            val_dataset = checkpoint['val_dataset']
+
+            train_loader = checkpoint['train_loader']
+            test_loader = checkpoint['test_loader']
+            val_loader = checkpoint['val_loader']
 
             print('Starting epoch: ', checkpoint['epoch'], ' Loss: {:.8f}'.format(checkpoint['loss']), 'Best accuracy: {:.8f}'.format(checkpoint['acc_best']))
             # DEBUG:
@@ -480,8 +501,7 @@ if __name__ == '__main__':
             sch_dict = scheduler.state_dict()
             print('Debug: ')
             print('Epoch:', epoch_start, ' LR: {:.8f}'.format(get_lr(optimizer)), 'Sch Epoch', sch_dict['last_epoch'])
-
-
+            print('Scheduler epoch:', scheduler.last_epoch)
         else:
             raise Exception('Checkpoint not found {}'.format(args.resume))
     
@@ -518,6 +538,16 @@ if __name__ == '__main__':
                 'scheduler_state_dict': scheduler.state_dict(),
                 'val_acc': val_acc,
                 'acc_best': acc_best,
+
+                # Not sure if need to save the datasets
+                'train_dataset': train_dataset,
+                'test_dataset': test_dataset,
+                'val_dataset': val_dataset,
+
+                'train_loader': train_loader,
+                'test_loader': test_loader,
+                'val_loader': val_loader,
+
                 'loss': loss}, args.model + '_best.pth')
 
         # Saves the current model dictionary with "_last.pth"
@@ -528,6 +558,16 @@ if __name__ == '__main__':
             'scheduler_state_dict': scheduler.state_dict(),
             'val_acc': val_acc,
             'acc_best': acc_best,
+
+            # Not sure if need to save the datasets
+            'train_dataset': train_dataset,
+            'test_dataset': test_dataset,
+            'val_dataset': val_dataset,
+
+            'train_loader': train_loader,
+            'test_loader': test_loader,
+            'val_loader': val_loader,
+
             'loss': loss}, args.model + '_last.pth')
 
     print ("Elapsed training {:.2f}".format((time.time() - start) / 3600.0), 'hours')
