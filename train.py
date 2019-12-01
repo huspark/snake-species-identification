@@ -92,13 +92,17 @@ def get_weights(dataset):
     weight_per_class = [0.] * n_classes   
     
     # Count number of images per class
-    for item in dataset:
-        w_classes[item[1]] += 1.0
+    for idx, val in enumerate(dataset):
+        if idx % 1000 == 0:
+            print(str(idx) + '/' + str(n_images) + ' processed for w_classes')
+        w_classes[val[1]] += 1.0
         
     for i in range(n_classes):                                                   
-        weight_per_class[i] = float(n_images)/float(w_classes[i])     
+        weight_per_class[i] = float(n_images)/float(w_classes[i])
         
     for idx, val in enumerate(dataset):
+        if idx % 1000 == 0:
+            print(str(idx) + '/' + str(n_images) + ' processed for w_images')
         w_images[idx] = weight_per_class[val[1]]  
         
     return w_classes, w_images
@@ -151,12 +155,16 @@ def train(epoch):
     
     # train loop
     if args.imbalanced:
-        normalized_w_classes = [float(val)/sum(w_classes) for val in w_classes]
+        normalized_w_classes = [sum(w_classes)/float(val) for val in w_classes]
+        normalized_w_classes = [float(val)/sum(w_classes) for val in normalized_w_classes]
+
+        num_transforms = 2
+        transform_prob = [1 - (1 - val ** (1 / num_transforms)) for val in normalized_w_classes]
 
     for batch_idx, batch in enumerate(train_loader):
         model.train()
         # prepare data
-        images, targets = Variable(batch[0]), Variable(batch[1])
+        images, targets = batch
         if args.imbalanced:
             for i in range(len(targets)):
                 # To ensure the probability of images[i] being augmented is equal to normalized_w_classes[targets[i]],
@@ -167,54 +175,27 @@ def train(epoch):
                 # which is equivalent to p = 1 - (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
                 # So, we set p (the probability of applying a random transformation to images[i] to the specified value
 
-                num_transforms = 4
-                p = 1 - (1 - normalized_w_classes[targets[i]]) ** (1 / num_transforms)
+                p = transform_prob[targets[i]]
 
-                # Debugging
-                if batch_idx < 10:
-                    print(targets[i])
-                    print(p)
+                #Debugging
+                # if batch_idx < 5:
+                #     print(targets[i])
+                #     print(p)
+
 
                 transform_list_imbalanced = []
                 transform_list_imbalanced.append(transforms.ToPILImage())
                 transform_list_imbalanced.append(transforms.RandomHorizontalFlip(p=p))
-                transform_list_imbalanced.append(transforms.RandomPerspective(p=p))
-                transform_list_imbalanced.append(transforms.RandomApply([transforms.RandomRotation(degrees=15)], p=p))
                 transform_list_imbalanced.append(transforms.RandomApply(
-                    [transforms.RandomResizedCrop(size=(args.height, args.width), scale=(0.5, 1.0))], p=p))
+                    [transforms.RandomResizedCrop(size=(args.height, args.width), scale=(0.6, 1.0))], p=p))
                 transform_list_imbalanced.append(transforms.ToTensor())
                 transform_imbalanced = transforms.Compose(transform_list_imbalanced)
                 images[i] = transform_imbalanced(images[i])
 
-                # To ensure the probability of images[i] being augmented is equal to normalized_w_classes[targets[i]],
-                # (1-p) ** num_transforms must be equal to 1 - normalized_w_classes[targets[i]]
-                # Here, p is the probability of each transformation in trasnform_list_imbalanced
+        images, targets = Variable(images), Variable(targets)
 
-                # Therefore, we set 1 - p = (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
-                # which is equivalent to p = 1 - (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
-                # So, we set p (the probability of applying a random transformation to images[i] to the specified value
-
-
-                # num_transforms = 4
-                # p = 1 - (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
-                # transform_list_imbalanced = []
-                # transform_list_imbalanced.append(transforms.RandomHorizontalFlip(p=p))
-                # transform_list_imbalanced.append(transforms.RandomPerspective(p=p))
-                # transform_list_imbalanced.append(transforms.RandomApply([transforms.RandomRotation(degrees=15)], p=p))
-                # transform_list_imbalanced.append(transforms.RandomApply(
-                #     [transforms.RandomResizedCrop(size=(args.height, args.width), scale=(0.5, 1.0))], p=p))
-                # transform_imbalanced = transforms.Compose(transform_list_imbalanced)
-                # tmp_trans = transforms.ToPILImage()
-                # img = tmp_trans(images[i])
-                # img.convert('RGB').show()
-                #
-                # img = transform_imbalanced(img)
-                # img.convert('RGB').show()
-                # tmp_trans = transforms.ToTensor()
-                # images[i] = tmp_trans(img)
         if args.cuda:
             images, targets = images.cuda(), targets.cuda()
-        
         output = model(images)
 		
 		# Use weighted cross-entropy when imbalaced flag is true
@@ -400,6 +381,25 @@ if __name__ == '__main__':
 
 
     if args.imbalanced:
+        # if os.path.exists('w_classes.txt') and os.path.exists('w_images.txt'):
+        #     w_classes = []
+        #     w_images = []
+        #     with open('w_classes.txt', 'r') as f:
+        #         for item in f:
+        #             w_classes.append(float(item[:-1]))
+        #     with open('w_images.txt', 'r') as f:
+        #         for item in f:
+        #             w_images.append(float(item[:-1]))
+        # else:
+        #     w_classes, w_images = get_weights(train_dataset)
+        #     with open('w_classes.txt', 'w') as f:
+        #         for item in w_classes:
+        #             f.write('%s\n' % item)
+        #
+        #     with open('w_images.txt', 'w') as f:
+        #         for item in w_images:
+        #             f.write('%s\n' % item)
+
         w_classes, w_images = get_weights(train_dataset)
         w_classes = torch.FloatTensor(w_classes)
         w_images = torch.DoubleTensor(w_images)
