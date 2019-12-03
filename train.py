@@ -473,9 +473,14 @@ if __name__ == '__main__':
     # print("Test new sampler end")
 
     if args.imbalanced:
+        print(w_classes_train_normalized)
+        print(sum(w_classes_train_normalized))
         num_transforms = 2
-        transform_prob = [1 - (1 - val ** (1 / num_transforms)) for val in w_classes_train_normalized]
+        # (1 - p) ** 2 = 1 - normalized
+        # 1 - p = (1 - normalized) ** (1/2)
+        transform_prob = [1 - (1 - val) ** (1 / num_transforms) for val in w_classes_train_normalized]
         transform_prob = torch.FloatTensor(transform_prob)
+        print(transform_prob)
         transform_prob = transform_prob.to(device)
 
         # Temporary, doesn't work
