@@ -15,10 +15,8 @@ from torchvision import transforms
 
 import pickle
 
-from sampler import ImbalancedDatasetSampler
 
-
-def filter_data(dataset, batch_size=256):
+def filter_data(dataset, batch_size=128):
     '''
     Filter non-snake or lizard images from the input dataset.
 
@@ -206,25 +204,25 @@ def train(epoch):
         # prepare data
         images, targets = Variable(batch[0]), Variable(batch[1])
 
-        if args.imbalanced:
-            for i in range(len(targets)):
-                # To ensure the probability of images[i] being augmented is equal to normalized_w_classes[targets[i]],
-                # (1-p) ** num_transforms must be equal to 1 - normalized_w_classes[targets[i]]
-                # Here, p is the probability of each transformation in trasnform_list_imbalanced
-
-                # Therefore, we set 1 - p = (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
-                # which is equivalent to p = 1 - (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
-                # So, we set p (the probability of applying a random transformation to images[i] to the specified value
-
-                p = transform_prob[targets[i]]
-                transform_list_imbalanced = []
-                transform_list_imbalanced.append(transforms.ToPILImage())
-                transform_list_imbalanced.append(transforms.RandomHorizontalFlip(p=p))
-                transform_list_imbalanced.append(transforms.RandomApply(
-                    [transforms.RandomResizedCrop(size=(args.height, args.width), scale=(0.6, 1.0))], p=p))
-                transform_list_imbalanced.append(transforms.ToTensor())
-                transform_imbalanced = transforms.Compose(transform_list_imbalanced)
-                images[i] = transform_imbalanced(images[i])
+        # if args.imbalanced:
+        #     for i in range(len(targets)):
+        #         # To ensure the probability of images[i] being augmented is equal to normalized_w_classes[targets[i]],
+        #         # (1-p) ** num_transforms must be equal to 1 - normalized_w_classes[targets[i]]
+        #         # Here, p is the probability of each transformation in trasnform_list_imbalanced
+        #
+        #         # Therefore, we set 1 - p = (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
+        #         # which is equivalent to p = 1 - (1-normalized_w_classes[targets[i]]) ** (1/num_transforms)
+        #         # So, we set p (the probability of applying a random transformation to images[i] to the specified value
+        #
+        #         p = transform_prob[targets[i]]
+        #         transform_list_imbalanced = []
+        #         transform_list_imbalanced.append(transforms.ToPILImage())
+        #         transform_list_imbalanced.append(transforms.RandomHorizontalFlip(p=p))
+        #         transform_list_imbalanced.append(transforms.RandomApply(
+        #             [transforms.RandomResizedCrop(size=(args.height, args.width), scale=(0.6, 1.0))], p=p))
+        #         transform_list_imbalanced.append(transforms.ToTensor())
+        #         transform_imbalanced = transforms.Compose(transform_list_imbalanced)
+        #         images[i] = transform_imbalanced(images[i])
 
         if args.cuda:
             images, targets = images.cuda(), targets.cuda()
@@ -467,23 +465,20 @@ if __name__ == '__main__':
     # print("Test new sampler end")
 
     if args.imbalanced:
-        count = np.zeros(85)
-        for label in dataset.targets:
-            count[label] += 1
-        # print(count)
-        count = [val/max(count) for val in count]
-        # print(count)
-        count = [1-val for val in count]
-        # print(count)
-        num_transforms = 2
+        # count = np.zeros(85)
+        # for label in dataset.targets:
+        #     count[label] += 1
+        # count = [val/max(count) for val in count]
+        # count = [1-val for val in count]
+
+        # num_transforms = 2
         # (1 - p) ** 2 = 1 - count
         # 1 - p = (1 - normalized) ** (1/2)
-        transform_prob = [1 - (1 - val) ** (1 / num_transforms) for val in count]
-        transform_prob = torch.FloatTensor(transform_prob)
-        transform_prob = transform_prob.to(device)
+        # transform_prob = [1 - (1 - val) ** (1 / num_transforms) for val in count]
+        # transform_prob = torch.FloatTensor(transform_prob)
+        # transform_prob = transform_prob.to(device)
         # print(transform_prob)
 
-        # Temporary, doesn't work
         train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, sampler=train_sampler,
                                        **kwargs)
     else:
