@@ -4,11 +4,13 @@ test_images_small/
 test_images_small_resized/
 train_archive/
 train_images/
+bad/
 
 # Python
 __pycache__/
 *.pyc
 *.pyo
+train_temp.py
 
 # Jupyter
 .ipynb_checkpoints
