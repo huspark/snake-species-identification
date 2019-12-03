@@ -225,7 +225,7 @@ def train(epoch):
                 transform_list_imbalanced.append(transforms.ToTensor())
                 transform_imbalanced = transforms.Compose(transform_list_imbalanced)
                 images[i] = transform_imbalanced(images[i])
-                
+
         if args.cuda:
             images, targets = images.cuda(), targets.cuda()
 
@@ -467,12 +467,21 @@ if __name__ == '__main__':
     # print("Test new sampler end")
 
     if args.imbalanced:
+        count = np.zeros(85)
+        for label in dataset.targets:
+            count[label] += 1
+        # print(count)
+        count = [val/max(count) for val in count]
+        # print(count)
+        count = [1-val for val in count]
+        # print(count)
         num_transforms = 2
-        # (1 - p) ** 2 = 1 - normalized
+        # (1 - p) ** 2 = 1 - count
         # 1 - p = (1 - normalized) ** (1/2)
-        transform_prob = [1 - (1 - val) ** (1 / num_transforms) for val in w_classes_train_normalized]
+        transform_prob = [1 - (1 - val) ** (1 / num_transforms) for val in count]
         transform_prob = torch.FloatTensor(transform_prob)
         transform_prob = transform_prob.to(device)
+        # print(transform_prob)
 
         # Temporary, doesn't work
         train_loader = data.DataLoader(dataset=train_dataset, batch_size=args.batch_size, sampler=train_sampler,
