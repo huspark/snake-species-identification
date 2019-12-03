@@ -217,13 +217,6 @@ def train(epoch):
                 # So, we set p (the probability of applying a random transformation to images[i] to the specified value
 
                 p = transform_prob[targets[i]]
-
-                #Debugging
-                # if batch_idx < 5:
-                #     print(targets[i])
-                #     print(p)
-
-
                 transform_list_imbalanced = []
                 transform_list_imbalanced.append(transforms.ToPILImage())
                 transform_list_imbalanced.append(transforms.RandomHorizontalFlip(p=p))
@@ -232,6 +225,7 @@ def train(epoch):
                 transform_list_imbalanced.append(transforms.ToTensor())
                 transform_imbalanced = transforms.Compose(transform_list_imbalanced)
                 images[i] = transform_imbalanced(images[i])
+                
         if args.cuda:
             images, targets = images.cuda(), targets.cuda()
 
@@ -473,14 +467,11 @@ if __name__ == '__main__':
     # print("Test new sampler end")
 
     if args.imbalanced:
-        print(w_classes_train_normalized)
-        print(sum(w_classes_train_normalized))
         num_transforms = 2
         # (1 - p) ** 2 = 1 - normalized
         # 1 - p = (1 - normalized) ** (1/2)
         transform_prob = [1 - (1 - val) ** (1 / num_transforms) for val in w_classes_train_normalized]
         transform_prob = torch.FloatTensor(transform_prob)
-        print(transform_prob)
         transform_prob = transform_prob.to(device)
 
         # Temporary, doesn't work
